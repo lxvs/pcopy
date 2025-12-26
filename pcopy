@@ -1,0 +1,107 @@
+#!/bin/sh
+
+set -o nounset
+
+main () {
+    local path= remote= t=2 shortpath dest session_name
+    local list="$HOME/.remotelist"
+    local log_dir="$HOME/.logs"
+    local log_failed="$log_dir/pcopy-failed.log"
+    local log_ok="$log_dir/pcopy-ok.log"
+
+    if test $# -lt 2
+    then
+        printf >&2 "usage: %s [<options>] <local_path> <remote>\n" "${0##*/}"
+        return 1
+    fi
+
+    if test ! "${STY-}"
+    then
+        printf >&2 "error: not in a screen session, abort\n"
+        return 1
+    fi
+
+    for arg in "$@"; do
+        case $arg in
+            -t*)
+                t=${arg#-t}
+                available_transfers="1-4"
+                case $t in
+                    [$available_transfers])
+                        ;;
+                    *)
+                        printf >&2 "error: invalid transfer option: %s\n" "$t"
+                        printf >&2 "available options: %s\n" "$available_transfers"
+                        return 1
+                        ;;
+                esac
+                ;;
+            *)
+                if test ! "$path"; then
+                    path=$arg
+                elif test ! "$remote"; then
+                    remote=${arg%:}
+                else
+                    printf >&2 "error: invalid argument: %s\n" "$arg"
+                    return 1
+                fi
+                ;;
+        esac
+    done
+
+    if test ! "$path" || test ! "$remote"; then
+        printf >&2 "error: path or remote not specified\n"
+        return 1
+    fi
+
+    if ! grep -q '^'"$remote"'$' "$list"
+    then
+        printf >&2 "error: invalid remote: %s\n" "$remote"
+        printf >&2 "available: "
+        printf >&2 "%s, " "$(cat "$list")"
+        printf >&2 "\b\b.\n"
+        return 1
+    fi
+
+    if test ! -e "$path"
+    then
+        printf >&2 "error: path does not exist: %s\n" "$path"
+        return 1
+    fi
+
+    dest="$remote:_"
+    shortpath="$(basename "$path")"
+
+    if test -d "$path"
+    then
+        dest="$dest/$shortpath"
+    fi
+
+    session_name="pcopy-$remote-$(printf "%s" "$shortpath" | colrm 25 | tr '[:punct:][:space:]' '-' | sed 's/-\{2,\}/-/g')"
+    screen -X sessionname "$session_name"
+
+    printf "%s:  %s -> %s\n" "$(now)" "$shortpath" "$dest"
+
+    mkdir --parents "$log_dir"
+
+    trap interrupted INT
+    if ! rclone copy -v --transfers "$t" "$path" "$dest"
+    then
+        printf "%s [ERROR] Pre-copy failed: %s -> %s\n" "$(now)" "$shortpath" "$dest" | tee -a "$log_failed" >&2
+        return 1
+    fi
+
+    printf "%s [%s] %s\n" "$(now)" "$remote" "$shortpath" | tee -a "$log_ok" >&2
+    return 0
+}
+
+now () {
+    date +"%m/%d %H:%M:%S"
+}
+
+interrupted () {
+    printf "%s [WARNING] Interrupted: [%s] %s\n" "$(now)" "$remote" "$shortpath" | tee -a "$log_ok" >&2
+    exit 0
+}
+
+main "$@" || cat
