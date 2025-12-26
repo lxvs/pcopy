@@ -3,21 +3,14 @@
 set -o nounset
 
 main () {
-    local path= remote= t=2 shortpath dest session_name
+    local path= remote= t=2 shortpath dest session_name inscreen=
     local list="$HOME/.remotelist"
     local log_dir="$HOME/.logs"
     local log_failed="$log_dir/pcopy-failed.log"
     local log_ok="$log_dir/pcopy-ok.log"
 
-    if test $# -lt 2
-    then
+    if test $# -lt 2; then
         printf >&2 "usage: %s [<options>] <local_path> <remote>\n" "${0##*/}"
-        return 1
-    fi
-
-    if test ! "${STY-}"
-    then
-        printf >&2 "error: not in a screen session, abort\n"
         return 1
     fi
 
@@ -35,6 +28,9 @@ main () {
                         return 1
                         ;;
                 esac
+                ;;
+            :SCREEN:)
+                inscreen=1
                 ;;
             *)
                 if test ! "$path"; then
@@ -58,7 +54,7 @@ main () {
     then
         printf >&2 "error: invalid remote: %s\n" "$remote"
         printf >&2 "available: "
-        printf >&2 "%s, " "$(cat "$list")"
+        printf >&2 "%s, " `cat "$list"`
         printf >&2 "\b\b.\n"
         return 1
     fi
@@ -77,21 +73,24 @@ main () {
         dest="$dest/$shortpath"
     fi
 
-    session_name="pcopy-$remote-$(printf "%s" "$shortpath" | colrm 25 | tr '[:punct:][:space:]' '-' | sed 's/-\{2,\}/-/g')"
-    screen -X sessionname "$session_name"
+    if test ! "$inscreen"; then
+        session_name="pcopy-$remote-$(printf "%s" "$shortpath" | colrm 25 | tr '[:punct:][:space:]' '-' | sed 's/-\{2,\}/-/g')"
+        screen -dmS "$session_name" sh -c '"$@"' -s "$0" ":SCREEN:" "$@"
+        return
+    fi
 
-    printf "%s:  %s -> %s\n" "$(now)" "$shortpath" "$dest"
+    printf "%s:  %s -> %s\n" "$(now)" "$shortpath" "$dest" | tee -a "$log_dir/$STY.log"
 
-    mkdir --parents "$log_dir"
+    mkdir --parents "$log_dir" >>"$log_dir/$STY.log" 2>>"$log_dir/$STY.log"
 
     trap interrupted INT
-    if ! rclone copy -v --transfers "$t" "$path" "$dest"
-    then
+    if ! rclone copy -v --transfers "$t" "$path" "$dest" 2>&1 | tee -a "$log_dir/$STY.log"; then
         printf "%s [ERROR] Pre-copy failed: %s -> %s\n" "$(now)" "$shortpath" "$dest" | tee -a "$log_failed" >&2
         return 1
     fi
 
-    printf "%s [%s] %s\n" "$(now)" "$remote" "$shortpath" | tee -a "$log_ok" >&2
+    printf "%s [%s] %s\n" "$(now)" "$remote" "$shortpath" | tee -a "$log_ok"
+    rm "$log_dir/$STY.log"
     return 0
 }
 
@@ -104,4 +103,4 @@ interrupted () {
     exit 0
 }
 
-main "$@" || cat
+main "$@"
