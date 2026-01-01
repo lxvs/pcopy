@@ -9,6 +9,7 @@ main () {
     local log_failed="$log_dir/pcopy-failed.log"
     local log_ok="$log_dir/pcopy-ok.log"
     local log_sty
+    local fail
 
     if test $# -lt 2; then
         printf >&2 "usage: %s [<options>] <local_path> <remote>\n" "${0##*/}"
@@ -87,10 +88,14 @@ main () {
     mkdir --parents "$log_dir" >>"$log_sty" 2>>"$log_sty"
 
     trap interrupted INT
-    if ! rclone copy -v --transfers "$t" "$path" "$dest" 2>&1 | tee -a "$log_sty"; then
+    fail="$(mktemp)"
+    { rclone copy -v --transfers "$t" "$path" "$dest" 2>&1 || echo "$?" >"$fail" ; } | tee -a "$log_sty"
+    if test -s "$fail"; then
         printf "%s [ERROR] Pre-copy failed: %s -> %s\n" "$(now)" "$shortpath" "$dest" | tee -a "$log_failed" >&2
+        rm "$fail"
         return 1
     fi
+    rm "$fail"
 
     printf "%s [%s] %s\n" "$(now)" "$remote" "$shortpath" | tee -a "$log_ok"
     rm "$log_sty"
@@ -103,6 +108,7 @@ now () {
 
 interrupted () {
     printf "%s [WARNING] Interrupted: [%s] %s\n" "$(now)" "$remote" "$shortpath" | tee -a "$log_ok" >&2
+    rm "$fail"
     exit 0
 }
 
