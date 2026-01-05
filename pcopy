@@ -89,7 +89,7 @@ main () {
 
     trap interrupted INT
     fail="$(mktemp)"
-    { rclone copy -v --transfers "$t" "$path" "$dest" 2>&1 || echo "$?" >"$fail" ; } | tee -a "$log_sty"
+    { rclone copy -v --stats-unit bits --transfers "$t" "$path" "$dest" 2>&1 || echo "$?" >"$fail" ; } | tee -a "$log_sty"
     if test -s "$fail"; then
         printf "%s [ERROR] Pre-copy failed: %s -> %s\n" "$(now)" "$shortpath" "$dest" | tee -a "$log_failed" >&2
         rm "$fail"
